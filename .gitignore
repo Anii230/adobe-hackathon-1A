@@ -1,0 +1,20 @@
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Model files and large data
+models/*
+!models/MiniLM/.gitkeep
+
+# Logs
+*.log
+
+# Environment files
+.env
