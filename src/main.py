@@ -1,24 +1,15 @@
-from utils.pdf_utils import extract_text_lines
-from utils.layout_utils import score_heading_candidate
-from heading_detection.build_outline import assign_heading_levels
-import statistics
+import os
 
-lines = extract_text_lines("data/input/sample.pdf")
-font_sizes = [line["fonts"][0]["size"] for line in lines if line["fonts"]]
-avg_font_size = statistics.mean(font_sizes)
+import json
+from heading_detection.stateful_outline import generate_outline
 
-print("\nTop heading candidates:\n")
+INPUT_PDF = "data/input/sample.pdf"
+OUTPUT_JSON = "data/output/sample_output.json"
 
-# Score and print top candidates
-scored = []
-for line in lines:
-    score = score_heading_candidate(line, avg_font_size)
-    if score >= 2:  # You can tune this threshold
-        scored.append((score, line))
+os.makedirs(os.path.dirname(OUTPUT_JSON), exist_ok=True)
+result = generate_outline(INPUT_PDF)
 
-# Assign heading levels and build outline
-outline = assign_heading_levels(scored)
+with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+    json.dump(result, f, indent=4, ensure_ascii=False)
 
-print("\nFinal Outline:")
-for item in outline:
-    print(f"{item['level']} - Page {item['page']}: {item['text']}")
+print(f"[✓] Output written to {OUTPUT_JSON}")

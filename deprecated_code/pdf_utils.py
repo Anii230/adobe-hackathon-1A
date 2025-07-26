@@ -23,7 +23,7 @@ def extract_text_lines(pdf_path):
                     })
                 if line_text.strip():
                     lines.append({
-                        "text": line_text.strip(),
+                        "text": line_text,
                         "fonts": fonts,
                         "page": page_num,
                         "bbox": line["bbox"],  # position

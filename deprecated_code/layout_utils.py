@@ -38,8 +38,13 @@ def score_heading_candidate(line, avg_font_size):
     if text.isupper():
         score += 1
 
-    if len(text.split()) <= 10:
+
+    # Penalize short 1-2 word lines unless they're bold
+    word_count = len(text.split())
+    if 3 <= word_count <= 10:
         score += 1
+    elif word_count < 3 and not ("Bold" in font_name or font_flags in [4, 20]):
+        return 0
 
     # Bonus: starts with "Section", "Chapter", etc.
     if any(text.lower().startswith(k) for k in ("section", "chapter", "part")):
