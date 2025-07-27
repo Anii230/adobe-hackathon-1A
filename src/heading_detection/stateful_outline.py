@@ -1,165 +1,130 @@
-import fitz  # PyMuPDF
 import os
-import json
 import re
-from collections import Counter
+import json
+import fitz  # PyMuPDF
+import spacy
+from pathlib import Path
+from typing import List, Dict, Tuple
+from collections import Counter, defaultdict
 
-INPUT_DIR = "data/input"
-OUTPUT_DIR = "data/output"
+# Load spaCy NLP model
+try:
+    NLP = spacy.load("en_core_web_sm")
+except OSError:
+    print("❌ Please install spaCy model with: python -m spacy download en_core_web_sm")
+    NLP = None
 
-# ------------------------ UTILITY FUNCTIONS ------------------------
+class DocumentProfile:
+    def __init__(self, doc):
+        self.doc = doc
+        self.font_counts = Counter()
+        self.size_to_styles = defaultdict(Counter)
+        self.lines = self._extract_lines()
+        self._analyze_styles()
+        self.body_size = self._find_body_size()
+        self.heading_styles = self._find_heading_styles()
 
-def extract_lines(pdf_path):
-    spans_for_analysis = []
-    lines = []
-    doc = fitz.open(pdf_path)
+    def _extract_lines(self) -> List[Dict]:
+        lines = []
+        for page_num, page in enumerate(self.doc, start=1):
+            for block in page.get_text("dict")["blocks"]:
+                if block["type"] != 0:
+                    continue
+                for line in block["lines"]:
+                    spans = line.get("spans", [])
+                    if not spans:
+                        continue
+                    text = " ".join(span["text"] for span in spans).strip()
+                    if not text:
+                        continue
+                    first_span = spans[0]
+                    lines.append({
+                        "text": text,
+                        "page": page_num,
+                        "size": round(first_span["size"]),
+                        "font": first_span["font"],
+                        "is_bold": "bold" in first_span["font"].lower(),
+                        "bbox": fitz.Rect(line["bbox"])
+                    })
+        return lines
 
-    for page_num in range(doc.page_count):
-        page = doc.load_page(page_num)
-        blocks = page.get_text("dict", sort=True)["blocks"]
-        for block in blocks:
-            if block["type"] != 0:
+    def _analyze_styles(self):
+        for line in self.lines:
+            self.font_counts[line["size"]] += 1
+            self.size_to_styles[line["size"]][line["is_bold"]] += 1
+
+    def _find_body_size(self) -> float:
+        if not self.font_counts:
+            return 12.0
+        for size, _ in self.font_counts.most_common():
+            if self.size_to_styles[size].get(False, 0) > 0:
+                return size
+        return self.font_counts.most_common(1)[0][0]
+
+    def _find_heading_styles(self) -> Dict[float, int]:
+        sizes = sorted([s for s in self.font_counts if s > self.body_size], reverse=True)
+        return {s: i + 1 for i, s in enumerate(sizes)}
+
+
+class PDFOutlineExtractor:
+    def __init__(self, path: Path):
+        self.doc = fitz.open(path)
+        self.profile = DocumentProfile(self.doc)
+        self.title, self.title_bbox = self._identify_title()
+
+    def _identify_title(self) -> Tuple[str, fitz.Rect]:
+        title_lines = [l for l in self.profile.lines if l["page"] == 1 and l["size"] >= max(self.profile.font_counts)]
+        if not title_lines:
+            return "", None
+        title_text = " ".join(l["text"] for l in title_lines)
+        bbox = title_lines[0]["bbox"]
+        for line in title_lines[1:]:
+            bbox.include_rect(line["bbox"])
+        return title_text, bbox
+
+    def _is_valid_heading(self, line: Dict) -> Tuple[bool, int]:
+        level = self.profile.heading_styles.get(line["size"], None)
+        if level is None:
+            return False, None
+
+        text = line["text"]
+        if len(text.split()) > 25 or not re.search(r"[a-zA-Z]", text):
+            return False, None
+
+        if NLP:
+            doc = NLP(text)
+            if len(list(doc.sents)) > 1 or text.endswith("."):
+                return False, None
+            if not any(tok.pos_ in {"NOUN", "PROPN"} for tok in doc):
+                return False, None
+
+        return True, level
+
+    def _clean_text(self, text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _build_outline(self) -> List[Dict]:
+        headings = []
+        seen = set()
+        for line in self.profile.lines:
+            if line["page"] == 1 and self.title_bbox and line["bbox"].intersects(self.title_bbox):
                 continue
-            for line_dict in block["lines"]:
-                if not line_dict["spans"]:
-                    continue
-                first_span = line_dict["spans"][0]
-                if first_span["size"] < 7:
-                    continue
+            is_heading, level = self._is_valid_heading(line)
+            if not is_heading:
+                continue
+            key = (line["text"], line["page"])
+            if key in seen:
+                continue
+            seen.add(key)
+            headings.append({
+                "text": self._clean_text(line["text"]),
+                "page": line["page"],
+                "level": f"H{level}"
+            })
+        return headings
 
-                line_text = " ".join(s["text"].strip() for s in line_dict["spans"]).strip()
-                if not line_text or line_text.lower() in {"version", "table of contents", "page"}:
-                    continue
-
-                lines.append({
-                    "text": line_text,
-                    "page": page_num + 1,
-                    "font_size": first_span["size"],
-                    "font_name": first_span["font"],
-                    "is_bold": any(s["flags"] & 16 for s in line_dict["spans"]),
-                    "bbox": line_dict["bbox"],
-                    "y0": line_dict["bbox"][1]
-                })
-
-                for span in line_dict["spans"]:
-                    if span["text"].strip():
-                        spans_for_analysis.append({
-                            "text": span["text"].strip(),
-                            "font_size": span["size"],
-                            "is_bold": bool(span["flags"] & 16),
-                        })
-
-    doc.close()
-    return spans_for_analysis, lines
-
-def get_body_font_size(spans):
-    sizes = [
-        round(s['font_size']) for s in spans
-        if 9 <= s['font_size'] <= 14 and not s['is_bold'] and len(s['text']) > 20
-    ]
-    return Counter(sizes).most_common(1)[0][0] if sizes else 12.0
-
-def identify_title(lines):
-    candidates = [l for l in lines if l['page'] == 1 and l['y0'] < 400]
-    if not candidates:
-        return "", set()
-
-    max_font = max(l['font_size'] for l in candidates)
-    title_lines = [l for l in candidates if l['font_size'] >= 0.9 * max_font and len(l['text'].split()) <= 12]
-
-    title_lines.sort(key=lambda x: x['y0'])
-    full_title = " ".join(l['text'].strip() for l in title_lines).strip()
-    return full_title, {l['text'] for l in title_lines}
-
-def classify_heading_statefully(line, state, body_font_size):
-    text = line['text']
-    size = round(line['font_size'], 1)
-    is_bold = line['is_bold']
-    current_style = (size, is_bold)
-
-    if size <= body_font_size or len(text) < 5:
-        return None, state
-    if len(text.split()) > 25:
-        return None, state
-    if re.fullmatch(r"\d+(\.\d+)*", text.strip()):
-        return None, state
-
-    numeric_match = re.match(r"^\s*(\d+(\.\d+)*)\.?\s+", text)
-    if numeric_match:
-        level = numeric_match.group(1).count('.') + 1
-        state['level_styles'][level] = current_style
-        return f"H{level}", state
-
-    for level, style in state['level_styles'].items():
-        if style == current_style:
-            return f"H{level}", state
-
-    if not state['level_styles']:
-        state['level_styles'][1] = current_style
-        return "H1", state
-
-    sorted_levels = sorted(state['level_styles'].items(), key=lambda x: -x[1][0])
-    for level, (lvl_size, _) in sorted_levels:
-        if size < lvl_size:
-            new_level = level + 1
-            state['level_styles'][new_level] = current_style
-            return f"H{new_level}", state
-
-    state['level_styles'][1] = current_style
-    return "H1", state
-
-# ------------------------ OUTLINE GENERATION ------------------------
-
-def generate_outline(pdf_path):
-    spans, lines = extract_lines(pdf_path)
-    if not lines:
-        return {"title": "", "outline": []}
-
-    body_font = get_body_font_size(spans)
-    title, title_line_texts = identify_title(lines)
-    outline = []
-    seen = set()
-    state = {"level_styles": {}}
-
-    for line in lines:
-        if line['text'] in title_line_texts and line['page'] == 1:
-            continue
-        if line['bbox'][1] < 50 or line['bbox'][3] > 770:
-            continue
-        level, state = classify_heading_statefully(line, state, body_font)
-        if level:
-            clean_text = line['text'].rstrip(' .:').strip()
-            key = (clean_text, line['page'])
-            if key not in seen:
-                outline.append({
-                    "level": level,
-                    "text": clean_text,
-                    "page": line['page']
-                })
-                seen.add(key)
-
-    return {"title": title, "outline": outline}
-
-# ------------------------ MAIN EXECUTION ------------------------
-
-def main():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    pdf_files = [f for f in os.listdir(INPUT_DIR) if f.lower().endswith(".pdf")]
-
-    if not pdf_files:
-        print(f"No PDF files found in {INPUT_DIR}")
-        return
-
-    for file in pdf_files:
-        print(f"Processing {file}...")
-        try:
-            result = generate_outline(os.path.join(INPUT_DIR, file))
-            output_path = os.path.join(OUTPUT_DIR, os.path.splitext(file)[0] + ".json")
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(result, f, indent=4, ensure_ascii=False)
-            print(f"✅ Saved to {output_path}")
-        except Exception as e:
-            print(f"❌ Error processing {file}: {e}")
-
-if __name__ == "__main__":
-    main()
+    def extract(self) -> Dict:
+        return {
+            "title": self._clean_text(self.title),
+            "outline": self._build_outline()
+        }
