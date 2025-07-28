@@ -81,7 +81,7 @@ class DocumentProfile:
                         first_span = line_dict["spans"][0]
                         lines_on_page.append({
                             "text": text,
-                            "page": page_num + 1,
+                            "page": page_num ,
                             "size": round(first_span["size"]),
                             "font": first_span["font"],
                             "is_bold": "bold" in first_span["font"].lower() or "black" in first_span["font"].lower(),

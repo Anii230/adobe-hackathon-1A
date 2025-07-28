@@ -86,7 +86,7 @@ class PDFOutlineExtractor:
         for page_num in range(min(len(self.doc), 6)): # Check first 6 pages
             page_text = self.doc[page_num].get_text("text")
             if toc_header_re.search(page_text):
-                start_page = page_num + 1
+                start_page = page_num 
                 break
         
         if start_page == -1: return []
@@ -126,7 +126,7 @@ class PDFOutlineExtractor:
                         
                         page_int = utils.roman_to_int(page_str) if not page_str.isdigit() else int(page_str)
                         if title_part and page_int > 0:
-                            full_outline_entries.append({'level': level, 'text': title_part, 'page': page_int})
+                            full_outline_entries.append({'level': level, 'text': title_part, 'page': page_int-1})
         return full_outline_entries
 
     def _classify_heading_with_score(self, line: Dict) -> Tuple[bool, Optional[int]]:
@@ -140,7 +140,7 @@ class PDFOutlineExtractor:
         else:
             if word_count > 30 or word_count == 0: return False, None
 
-        page_height = self.doc[line['page'] - 1].rect.height
+        page_height = self.doc[line['page']].rect.height
         if page_height > 0 and (line['bbox'].y0 < page_height * 0.05 or line['bbox'].y1 > page_height * 0.95): return False, None # Header/footer
         if not re.search(r'[a-zA-Z\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF]', text): return False, None # No letters
 
@@ -192,7 +192,7 @@ class PDFOutlineExtractor:
         
         for line in self.profile.lines:
             # Skip lines on the first page that are above or part of the title
-            if self.title_bbox and line['page'] == 1 and line['bbox'].y1 <= self.title_bbox.y1: continue
+            if self.title_bbox and line['page'] == 0 and line['bbox'].y1 <= self.title_bbox.y1: continue
             
             is_heading, level = self._classify_heading_with_score(line)
             if is_heading:
@@ -206,7 +206,7 @@ class PDFOutlineExtractor:
 
     def _format_from_toc(self, toc: list) -> Dict:
         """Formats the built-in ToC from PyMuPDF into the desired structure."""
-        outline = [{"level": f"H{level}", "text": utils.clean_text(text).strip(), "page": page} for level, text, page in toc]
+        outline = [{"level": f"H{level}", "text": utils.clean_text(text).strip(), "page": page-1} for level, text, page in toc]
         return {"title": self.title, "outline": outline}
 
     def _identify_title(self) -> Tuple[str, Optional[fitz.Rect]]:
@@ -216,7 +216,7 @@ class PDFOutlineExtractor:
         
         candidate_lines = []
         for line in self.profile.lines:
-            if line['page'] == 1 and line['bbox'].y1 < y_limit:
+            if line['page'] == 0 and line['bbox'].y1 < y_limit:
                 is_large = line['size'] > self.profile.body_style[0]
                 is_bold = line['is_bold'] and not self.profile.body_style[1]
                 if is_large or is_bold:

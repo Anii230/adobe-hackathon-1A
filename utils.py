@@ -12,8 +12,8 @@ from langdetect import detect, DetectorFactory
 DetectorFactory.seed = 0
 
 # Define input and output directories
-INPUT_DIR = Path("data/input")
-OUTPUT_DIR = Path("data/output")
+INPUT_DIR = Path("input")
+OUTPUT_DIR = Path("output")
 
 # Global variables to hold the loaded spaCy model and detected language
 NLP = None
