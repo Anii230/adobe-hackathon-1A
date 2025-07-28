@@ -14,10 +14,6 @@ venv/
 .env
 .python-version
 
-# Model files (ignore everything except .tar.gz)
-models/
-!models/**/dist/*.tar.gz
-
 # Large files not needed
 *.whl
 extracted_model/
