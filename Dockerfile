@@ -1,26 +1,29 @@
-# Stage 1: Use an official Python runtime as a parent image
-# Specify platform for amd64 architecture and use a slim version for a smaller size.
-FROM --platform=linux/amd64 python:3.9-slim
+# Use slim Python 3.10 base
+FROM --platform=linux/amd64 python:3.10-slim
 
-# Set the working directory in the container to /app
+# Set working directory
 WORKDIR /app
 
-# Copy the requirements file into the container at /app
-# This is done first to leverage Docker's layer caching.
-COPY requirements.txt .
+# Install system dependencies required for PyMuPDF, spaCy, etc.
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libgl1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install any needed packages specified in requirements.txt
-# --no-cache-dir ensures the image is smaller
+# Copy and install Python dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download the spaCy models required by your application for offline use.
-# This is a critical step for meeting the "no network" constraint.
-RUN python -m spacy download en_core_web_sm && \
-    python -m spacy download ja_core_news_sm
+# Copy spaCy models tarballs and install
+COPY models/en_core_web_sm-3.8.0/dist/en_core_web_sm-3.8.0.tar.gz ./models/
+COPY models/xx_sent_ud_sm-3.8.0/dist/xx_sent_ud_sm-3.8.0.tar.gz ./models/
 
-# Copy the rest of your application's source code from your host to your image filesystem.
+RUN pip install --no-cache-dir ./models/en_core_web_sm-3.8.0.tar.gz && \
+    pip install --no-cache-dir ./models/xx_sent_ud_sm-3.8.0.tar.gz && \
+    rm -f ./models/*.tar.gz
+
+# Copy the rest of the codebase
 COPY . .
 
-# Specify the command to run on container startup.
-# This will execute your main script.
+# Run main script
 CMD ["python", "main.py"]

@@ -1,21 +1,24 @@
-
 # Python cache and bytecode
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
 
 # Virtual environments
 .venv/
 env/
 venv/
 
-# Model files and large data
-models/*
-!models/MiniLM/.gitkeep
-
-# Logs
+# Logs and environment
 *.log
-
-# Environment files
 .env
 .python-version
+
+# Model files (ignore everything except .tar.gz)
+models/
+!models/**/dist/*.tar.gz
+
+# Large files not needed
+*.whl
+extracted_model/
+extracted_xx/
