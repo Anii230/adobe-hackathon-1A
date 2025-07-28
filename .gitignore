@@ -18,3 +18,4 @@ models/*
 
 # Environment files
 .env
+.python-version
